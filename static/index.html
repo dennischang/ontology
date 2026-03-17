@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <title>Ontology Editor</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -42,9 +44,23 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
     .project-item:hover { background: #2d3f52; }
     .project-item.active { background: #2d3f52; border-left-color: #4a9eff; color: #fff; }
+    .project-item .project-del {
+      display: none;
+      background: none;
+      border: none;
+      color: #ff6b6b;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0 2px;
+      flex-shrink: 0;
+    }
+    .project-item:hover .project-del { display: inline; }
     #sidebar-footer { padding: 10px; border-top: 1px solid #2d3f52; }
     .btn-new-project {
       width: 100%;
@@ -306,7 +322,12 @@
   <div id="graph-toolbar">
     <button class="toolbar-btn" onclick="openModal('add-node')" id="btn-add-node" style="display:none">+ Node</button>
     <button class="toolbar-btn" onclick="openModal('add-edge')" id="btn-add-edge" style="display:none">+ Edge</button>
-    <button class="toolbar-btn" onclick="relayout()" id="btn-relayout" style="display:none">⟳ Layout</button>
+    <select class="toolbar-btn" id="layout-select" style="display:none" onchange="relayout()">
+      <option value="dagre-LR">← Hierarchical (L→R)</option>
+      <option value="dagre-TB">↓ Hierarchical (T→B)</option>
+      <option value="cose">Force-directed</option>
+    </select>
+    <button class="toolbar-btn" onclick="relayout()" id="btn-relayout" style="display:none">⟳ Re-layout</button>
   </div>
   <div id="cy"></div>
   <div id="empty-state">
@@ -501,8 +522,19 @@ async function loadProjects() {
   projects.forEach(id => {
     const el = document.createElement('div');
     el.className = 'project-item' + (id === currentProject ? ' active' : '');
-    el.textContent = id;
-    el.onclick = () => selectProject(id);
+    const name = document.createElement('span');
+    name.textContent = id;
+    name.onclick = () => selectProject(id);
+    name.style.flex = '1';
+    name.style.overflow = 'hidden';
+    name.style.textOverflow = 'ellipsis';
+    const del = document.createElement('button');
+    del.className = 'project-del';
+    del.textContent = '✕';
+    del.title = 'Delete project';
+    del.onclick = (e) => { e.stopPropagation(); deleteProject(id); };
+    el.appendChild(name);
+    el.appendChild(del);
     list.appendChild(el);
   });
 }
@@ -512,7 +544,7 @@ async function selectProject(id) {
   document.querySelectorAll('.project-item').forEach(el => {
     el.classList.toggle('active', el.textContent === id);
   });
-  ['btn-add-node','btn-add-edge','btn-relayout'].forEach(b => {
+  ['btn-add-node','btn-add-edge','btn-relayout','layout-select'].forEach(b => {
     document.getElementById(b).style.display = '';
   });
   document.getElementById('btn-suggest').disabled = false;
@@ -536,6 +568,25 @@ async function createProject() {
   } catch (e) { status(e.message, true); }
 }
 
+async function deleteProject(id) {
+  if (!confirm(`Delete project "${id}"? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/projects/${encodeURIComponent(id)}`);
+    if (currentProject === id) {
+      currentProject = null;
+      if (cy) { cy.elements().remove(); }
+      document.getElementById('empty-state').style.display = '';
+      ['btn-add-node','btn-add-edge','btn-relayout','layout-select'].forEach(b => {
+        document.getElementById(b).style.display = 'none';
+      });
+      document.getElementById('btn-suggest').disabled = true;
+      document.getElementById('btn-query').disabled = true;
+    }
+    await loadProjects();
+    status(`Project "${id}" deleted`);
+  } catch (e) { status(e.message, true); }
+}
+
 // ── Graph ──────────────────────────────────────────────────────
 function labelColor(label) {
   const palette = ['#2980b9','#27ae60','#c0392b','#d35400','#8e44ad','#16a085','#e67e22','#2c3e50'];
@@ -552,18 +603,25 @@ function initCytoscape() {
       {
         selector: 'node',
         style: {
+          'shape': 'round-rectangle',
           'background-color': ele => labelColor(ele.data('label') || ''),
-          'label': ele => `${ele.data('label')}\n${ele.id()}`,
+          'background-opacity': 0.9,
+          'label': ele => `${ele.id()}\n${ele.data('label')}`,
           'text-valign': 'center',
           'text-halign': 'center',
           'color': '#fff',
-          'text-outline-width': 2,
+          'text-outline-width': 1.5,
           'text-outline-color': ele => labelColor(ele.data('label') || ''),
-          'font-size': 10,
-          'width': 64,
-          'height': 64,
+          'font-size': 9,
+          'font-weight': 500,
+          'width': 'label',
+          'height': 'label',
+          'padding': '8px',
           'text-wrap': 'wrap',
-          'text-max-width': 60,
+          'text-max-width': 100,
+          'border-width': 1,
+          'border-color': ele => labelColor(ele.data('label') || ''),
+          'border-opacity': 0.3,
         }
       },
       {
@@ -571,22 +629,53 @@ function initCytoscape() {
         style: {
           'curve-style': 'bezier',
           'target-arrow-shape': 'triangle',
+          'arrow-scale': 0.8,
           'label': 'data(relation)',
-          'font-size': 10,
+          'font-size': 9,
           'text-rotation': 'autorotate',
           'text-margin-y': -8,
           'line-color': '#b0bec5',
-          'target-arrow-color': '#b0bec5',
-          'color': '#555',
+          'target-arrow-color': '#90a4ae',
+          'line-opacity': 0.7,
+          'width': 1.5,
+          'color': '#78909c',
+          'text-outline-width': 2,
+          'text-outline-color': '#fff',
         }
       },
       {
         selector: ':selected',
         style: {
-          'border-width': 3,
+          'border-width': 2,
           'border-color': '#4a9eff',
+          'border-opacity': 1,
           'line-color': '#4a9eff',
           'target-arrow-color': '#4a9eff',
+          'line-opacity': 1,
+        }
+      },
+      {
+        selector: '.neighbor',
+        style: {
+          'border-width': 2,
+          'border-color': '#4a9eff',
+          'border-opacity': 0.5,
+          'background-opacity': 1,
+        }
+      },
+      {
+        selector: 'edge.neighbor',
+        style: {
+          'line-color': '#4a9eff',
+          'target-arrow-color': '#4a9eff',
+          'line-opacity': 0.5,
+          'width': 2,
+        }
+      },
+      {
+        selector: '.dimmed',
+        style: {
+          'opacity': 0.25,
         }
       }
     ],
@@ -596,17 +685,20 @@ function initCytoscape() {
 
   cy.on('tap', 'node', e => {
     selectedElement = e.target;
+    highlightNeighborhood(e.target);
     showNodeDetails(e.target);
     showTab('details');
   });
   cy.on('tap', 'edge', e => {
     selectedElement = e.target;
+    clearHighlight();
     showEdgeDetails(e.target);
     showTab('details');
   });
   cy.on('tap', e => {
     if (e.target === cy) {
       selectedElement = null;
+      clearHighlight();
       document.getElementById('details-node').style.display = 'none';
       document.getElementById('details-edge').style.display = 'none';
       document.getElementById('details-empty').style.display = '';
@@ -637,9 +729,39 @@ function renderGraph(data) {
   document.getElementById('empty-state').style.display = data.nodes.length ? 'none' : '';
 }
 
-function relayout() {
+function highlightNeighborhood(node) {
+  clearHighlight();
+  const neighborhood = node.neighborhood().add(node);
+  cy.elements().not(neighborhood).addClass('dimmed');
+  neighborhood.edges().addClass('neighbor');
+  neighborhood.nodes().not(node).addClass('neighbor');
+}
+
+function clearHighlight() {
   if (!cy) return;
-  cy.layout({ name: 'cose', animate: true, randomize: false, fit: true, padding: 40 }).run();
+  cy.elements().removeClass('dimmed neighbor');
+}
+
+function relayout() {
+  if (!cy || cy.nodes().length === 0) return;
+  const choice = document.getElementById('layout-select').value;
+  let opts;
+  if (choice === 'cose') {
+    opts = { name: 'cose', animate: true, randomize: false, fit: true, padding: 40, nodeRepulsion: 8000 };
+  } else {
+    const dir = choice === 'dagre-TB' ? 'TB' : 'LR';
+    opts = {
+      name: 'dagre',
+      rankDir: dir,
+      nodeSep: 40,
+      rankSep: 80,
+      edgeSep: 20,
+      animate: true,
+      fit: true,
+      padding: 40,
+    };
+  }
+  cy.layout(opts).run();
 }
 
 // ── Schema ─────────────────────────────────────────────────────

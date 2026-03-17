@@ -1,8 +1,11 @@
 import re
 import json
+import logging
 import anthropic
 from dotenv import load_dotenv
 from db import get_schema, sparql_query, get_all_nodes
+
+log = logging.getLogger("ontology")
 
 load_dotenv()
 client = anthropic.Anthropic()
@@ -63,11 +66,32 @@ Rules:
     return json.loads(_extract_json(response.content[0].text))
 
 
+def _nodes_summary(project_id: str) -> str:
+    """Build a compact summary of existing nodes for LLM context."""
+    from db import get_all_nodes, get_all_edges
+    nodes = get_all_nodes(project_id)
+    edges = get_all_edges(project_id)
+    if not nodes:
+        return "Graph is empty."
+    lines = ["Existing nodes (id | label | properties):"]
+    for n in nodes[:100]:  # cap at 100 to avoid context overflow
+        props = ", ".join(f'{k}="{v}"' for k, v in n["properties"].items())
+        lines.append(f'  {n["id"]} | {n["label"]} | {props}')
+    if edges:
+        lines.append("\nExisting edges (source → relation → target):")
+        for e in edges[:100]:
+            lines.append(f'  {e["source"]} →{e["relation"]}→ {e["target"]}')
+    return "\n".join(lines)
+
+
 def nl_query(project_id: str, question: str) -> dict:
     schema = get_schema(project_id)
-    ns = f"http://ontology.local/p/{project_id}/"
+    ns = f"http://ontology.local/p/{re.sub(r'[^a-zA-Z0-9._~-]', '_', project_id)}/"
+    nodes_summary = _nodes_summary(project_id)
 
     prompt = f"""{_schema_text(schema)}
+
+{nodes_summary}
 
 Graph URI patterns:
   Nodes:      {ns}n/{{id}}
@@ -82,6 +106,8 @@ Prefixes available:
 Question: {question}
 
 Generate a SPARQL SELECT query to answer this question.
+Use the exact node IDs and property/relation names from the data above.
+When the user refers to a node by name, match it by its node ID in the URI pattern, not by a property value.
 Return ONLY valid JSON: {{"sparql": "SELECT ... WHERE {{ ... }}"}}"""
 
     response = client.messages.create(
@@ -92,8 +118,11 @@ Return ONLY valid JSON: {{"sparql": "SELECT ... WHERE {{ ... }}"}}"""
     result = json.loads(_extract_json(response.content[0].text))
     sparql = result["sparql"]
 
+    log.info(f"[{project_id}] Generated SPARQL: {sparql}")
     try:
         query_result = sparql_query(project_id, sparql)
+        log.info(f"[{project_id}] SPARQL result: {query_result}")
         return {"sparql": sparql, "result": query_result, "error": None}
     except Exception as e:
+        log.error(f"[{project_id}] SPARQL execution error: {e}")
         return {"sparql": sparql, "result": None, "error": str(e)}

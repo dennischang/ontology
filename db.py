@@ -1,6 +1,6 @@
+import re
 import pyoxigraph as ox
 from pathlib import Path
-from urllib.parse import quote, unquote
 
 PROJECTS_DIR = Path("projects")
 BASE = "http://ontology.local/"
@@ -26,8 +26,8 @@ def _ns(project_id: str) -> str:
 
 
 def _iri_safe(s: str) -> str:
-    """Percent-encode characters that are invalid in IRIs."""
-    return quote(s, safe="-._~")
+    """Replace non-IRI-safe characters with underscores."""
+    return re.sub(r'[^a-zA-Z0-9._~-]', '_', s)
 
 
 def _node(project_id: str, node_id: str) -> ox.NamedNode:
@@ -138,8 +138,8 @@ def get_all_nodes(project_id: str) -> list[dict]:
     for q in store.quads_for_pattern(None, RDF_TYPE, None, DG):
         s, o = _val(q.subject), _val(q.object)
         if s.startswith(node_prefix) and o.startswith(class_prefix):
-            node_id = unquote(s[len(node_prefix):])
-            label = unquote(o[len(class_prefix):])
+            node_id = s[len(node_prefix):]
+            label = o[len(class_prefix):]
             nodes[node_id] = {"id": node_id, "label": label, "properties": {}}
 
     for node_id in nodes:
@@ -147,7 +147,7 @@ def get_all_nodes(project_id: str) -> list[dict]:
         for q in store.quads_for_pattern(n, None, None, DG):
             p = _val(q.predicate)
             if p.startswith(prop_prefix):
-                nodes[node_id]["properties"][unquote(p[len(prop_prefix):])] = _val(q.object)
+                nodes[node_id]["properties"][p[len(prop_prefix):]] = _val(q.object)
 
     return list(nodes.values())
 
@@ -163,9 +163,9 @@ def get_all_edges(project_id: str) -> list[dict]:
         s, p, o = _val(q.subject), _val(q.predicate), _val(q.object)
         if s.startswith(node_prefix) and p.startswith(rel_prefix) and o.startswith(node_prefix):
             edges.append({
-                "source": unquote(s[len(node_prefix):]),
-                "relation": unquote(p[len(rel_prefix):]),
-                "target": unquote(o[len(node_prefix):]),
+                "source": s[len(node_prefix):],
+                "relation": p[len(rel_prefix):],
+                "target": o[len(node_prefix):],
             })
     return edges
 
@@ -185,21 +185,21 @@ def get_schema(project_id: str) -> dict:
     for q in store.quads_for_pattern(None, RDF_TYPE, None, DG):
         s, o = _val(q.subject), _val(q.object)
         if s.startswith(node_prefix) and o.startswith(class_prefix):
-            label = unquote(o[len(class_prefix):])
+            label = o[len(class_prefix):]
             labels.add(label)
             props_by_label.setdefault(label, set())
 
     for q in store.quads_for_pattern(None, None, None, DG):
         s, p, o = _val(q.subject), _val(q.predicate), _val(q.object)
         if p.startswith(rel_prefix):
-            relations.add(unquote(p[len(rel_prefix):]))
+            relations.add(p[len(rel_prefix):])
         if s.startswith(node_prefix) and p.startswith(prop_prefix):
             n = q.subject
             for q2 in store.quads_for_pattern(n, RDF_TYPE, None, DG):
                 cls = _val(q2.object)
                 if cls.startswith(class_prefix):
-                    label = unquote(cls[len(class_prefix):])
-                    props_by_label.setdefault(label, set()).add(unquote(p[len(prop_prefix):]))
+                    label = cls[len(class_prefix):]
+                    props_by_label.setdefault(label, set()).add(p[len(prop_prefix):])
 
     return {
         "node_labels": sorted(labels),
@@ -218,8 +218,11 @@ def sparql_query(project_id: str, sparql: str) -> dict:
         for solution in result:
             row = {}
             for var in variables:
-                term = solution.get(var)
-                row[var] = term.value if term is not None else None
+                try:
+                    term = solution[var]
+                    row[var] = term.value if term is not None else None
+                except KeyError:
+                    row[var] = None
             rows.append(row)
         return {"type": "select", "variables": variables, "rows": rows}
     elif isinstance(result, ox.QueryBoolean):

@@ -173,8 +173,12 @@ class SparqlBody(BaseModel):
 @app.post("/projects/{project_id}/sparql")
 def run_sparql(project_id: str, body: SparqlBody):
     try:
-        return db.sparql_query(project_id, body.sparql)
+        log.info(f"[{project_id}] Raw SPARQL: {body.sparql}")
+        result = db.sparql_query(project_id, body.sparql)
+        log.info(f"[{project_id}] Raw SPARQL result: {result}")
+        return result
     except Exception as e:
+        log.error(f"[{project_id}] Raw SPARQL error: {e}")
         raise HTTPException(400, str(e))
 
 
