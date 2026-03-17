@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ontology Editor</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      display: grid;
+      grid-template-columns: 220px 1fr 380px;
+      height: 100vh;
+      overflow: hidden;
+      background: #f0f2f5;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      background: #1e2a3a;
+      color: #cdd6e0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #sidebar h1 {
+      font-size: 14px;
+      font-weight: 600;
+      padding: 16px 14px 12px;
+      color: #fff;
+      border-bottom: 1px solid #2d3f52;
+      letter-spacing: .3px;
+    }
+    #project-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+    .project-item {
+      padding: 8px 14px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: background .15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .project-item:hover { background: #2d3f52; }
+    .project-item.active { background: #2d3f52; border-left-color: #4a9eff; color: #fff; }
+    #sidebar-footer { padding: 10px; border-top: 1px solid #2d3f52; }
+    .btn-new-project {
+      width: 100%;
+      padding: 7px;
+      background: #4a9eff;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .btn-new-project:hover { background: #3a8ef0; }
+
+    /* ── Graph area ── */
+    #graph-area {
+      position: relative;
+      background: #fff;
+      border-right: 1px solid #dde3ec;
+    }
+    #cy { width: 100%; height: 100%; }
+    #graph-toolbar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      display: flex;
+      gap: 6px;
+      z-index: 10;
+    }
+    .toolbar-btn {
+      padding: 5px 10px;
+      background: #fff;
+      border: 1px solid #ccd3dc;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.1);
+    }
+    .toolbar-btn:hover { background: #f5f7fa; }
+    #empty-state {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #8a97a8;
+      gap: 10px;
+      pointer-events: none;
+    }
+    #empty-state .hint { font-size: 12px; }
+
+    /* ── Right panel ── */
+    #right-panel {
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      overflow: hidden;
+    }
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid #dde3ec;
+      background: #f8f9fb;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 10px 4px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      color: #6b7a8d;
+      border-bottom: 2px solid transparent;
+      transition: color .15s;
+    }
+    .tab-btn:hover { color: #333; }
+    .tab-btn.active { color: #4a9eff; border-bottom-color: #4a9eff; }
+    .tab-pane { display: none; flex: 1; overflow-y: auto; padding: 14px; flex-direction: column; gap: 10px; }
+    .tab-pane.active { display: flex; }
+
+    /* ── Form elements ── */
+    label { font-size: 11px; font-weight: 600; color: #6b7a8d; text-transform: uppercase; letter-spacing: .4px; }
+    textarea, input[type=text] {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #dde3ec;
+      border-radius: 5px;
+      font-size: 12px;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+    }
+    textarea:focus, input[type=text]:focus { border-color: #4a9eff; }
+    .btn {
+      padding: 7px 14px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .btn-primary { background: #4a9eff; color: #fff; }
+    .btn-primary:hover { background: #3a8ef0; }
+    .btn-primary:disabled { background: #a8c8ff; cursor: not-allowed; }
+    .btn-danger { background: #ff4d4f; color: #fff; }
+    .btn-danger:hover { background: #e03e40; }
+    .btn-secondary { background: #f0f2f5; color: #444; border: 1px solid #dde3ec; }
+    .btn-secondary:hover { background: #e8eaed; }
+    .btn-sm { padding: 4px 8px; font-size: 11px; }
+
+    /* ── Diff preview ── */
+    #diff-preview { display: none; flex-direction: column; gap: 8px; }
+    #diff-preview.visible { display: flex; }
+    .diff-header { font-weight: 600; font-size: 12px; color: #333; }
+    .diff-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+    .diff-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 7px 9px;
+      border-radius: 5px;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .diff-item.add { background: #f0faf0; border: 1px solid #b7ddb7; }
+    .diff-item.modify { background: #fffbf0; border: 1px solid #ffe58f; }
+    .diff-item.delete { background: #fff2f0; border: 1px solid #ffb4b4; }
+    .diff-item input[type=checkbox] { margin-top: 1px; flex-shrink: 0; }
+    .diff-item .diff-text { flex: 1; }
+    .diff-item .diff-op { font-weight: 700; margin-right: 4px; }
+    .diff-item.add .diff-op { color: #389e0d; }
+    .diff-item.modify .diff-op { color: #d48806; }
+    .diff-item.delete .diff-op { color: #cf1322; }
+    .diff-actions { display: flex; gap: 8px; }
+
+    /* ── Query results ── */
+    #query-sparql {
+      background: #f8f9fb;
+      border: 1px solid #dde3ec;
+      border-radius: 5px;
+      padding: 8px;
+      font-family: 'Menlo', 'Courier New', monospace;
+      font-size: 11px;
+      color: #555;
+      white-space: pre-wrap;
+      word-break: break-all;
+      display: none;
+    }
+    #query-results-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #query-results-table th { background: #f0f2f5; padding: 5px 8px; text-align: left; border: 1px solid #e0e5ec; font-weight: 600; }
+    #query-results-table td { padding: 5px 8px; border: 1px solid #e0e5ec; word-break: break-all; }
+    #query-results-table tr:nth-child(even) td { background: #fafbfc; }
+
+    /* ── Schema view ── */
+    .schema-section { margin-bottom: 12px; }
+    .schema-section h4 { font-size: 11px; font-weight: 700; color: #6b7a8d; text-transform: uppercase; margin-bottom: 6px; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      margin: 2px;
+      font-weight: 500;
+    }
+    .tag-label { background: #e6f4ff; color: #1677ff; border: 1px solid #91caff; }
+    .tag-rel { background: #fff7e6; color: #d46b08; border: 1px solid #ffd591; }
+    .tag-prop { background: #f6ffed; color: #389e0d; border: 1px solid #b7eb8f; }
+
+    /* ── Details panel ── */
+    #details-empty { color: #aaa; font-size: 12px; text-align: center; margin-top: 30px; }
+    .detail-section { margin-bottom: 12px; }
+    .detail-section h4 { font-size: 11px; font-weight: 700; color: #6b7a8d; text-transform: uppercase; margin-bottom: 6px; }
+    .detail-row { display: flex; gap: 6px; margin-bottom: 5px; }
+    .detail-row input { flex: 1; }
+    .props-editor { display: flex; flex-direction: column; gap: 4px; }
+    .prop-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; align-items: center; }
+    #detail-node-id { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+    #detail-node-label {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 10px;
+    }
+
+    /* ── Modal ── */
+    #modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.4);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    #modal-overlay.visible { display: flex; }
+    .modal {
+      background: #fff;
+      border-radius: 8px;
+      padding: 20px;
+      width: 360px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.2);
+    }
+    .modal h3 { margin-bottom: 14px; font-size: 14px; }
+    .modal-field { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+    .props-input-hint { font-size: 10px; color: #aaa; margin-top: 2px; }
+
+    /* ── Status bar ── */
+    #status {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #333;
+      color: #fff;
+      padding: 7px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity .3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    #status.show { opacity: 1; }
+
+    /* ── Loading ── */
+    .loading { opacity: .5; pointer-events: none; }
+    .spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #ccc;
+      border-top-color: #4a9eff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<div id="sidebar">
+  <h1>⬡ Ontology Editor</h1>
+  <div id="project-list"></div>
+  <div id="sidebar-footer">
+    <button class="btn-new-project" onclick="openModal('new-project')">+ New Project</button>
+  </div>
+</div>
+
+<!-- ── Graph area ── -->
+<div id="graph-area">
+  <div id="graph-toolbar">
+    <button class="toolbar-btn" onclick="openModal('add-node')" id="btn-add-node" style="display:none">+ Node</button>
+    <button class="toolbar-btn" onclick="openModal('add-edge')" id="btn-add-edge" style="display:none">+ Edge</button>
+    <button class="toolbar-btn" onclick="relayout()" id="btn-relayout" style="display:none">⟳ Layout</button>
+  </div>
+  <div id="cy"></div>
+  <div id="empty-state">
+    <div style="font-size:32px">⬡</div>
+    <div>Select or create a project to get started</div>
+    <div class="hint">Use the LLM Edit tab to populate the graph with natural language</div>
+  </div>
+</div>
+
+<!-- ── Right panel ── -->
+<div id="right-panel">
+  <div class="tabs">
+    <button class="tab-btn active" onclick="showTab('edit')">LLM Edit</button>
+    <button class="tab-btn" onclick="showTab('query')">Query</button>
+    <button class="tab-btn" onclick="showTab('schema')">Schema</button>
+    <button class="tab-btn" onclick="showTab('details')">Details</button>
+  </div>
+
+  <!-- Edit tab -->
+  <div class="tab-pane active" id="tab-edit">
+    <label>Content / Instructions</label>
+    <textarea id="edit-content" rows="6" placeholder="Paste text, describe entities, or give instructions…
+e.g. 'Alice is a software engineer at Acme Corp. She manages Bob, who is a designer.'"></textarea>
+    <button class="btn btn-primary" id="btn-suggest" onclick="suggestEdits()" disabled>
+      Suggest Changes
+    </button>
+
+    <div id="diff-preview">
+      <div class="diff-header">Suggested changes — review before applying:</div>
+      <div class="diff-list" id="diff-list"></div>
+      <div class="diff-actions">
+        <button class="btn btn-primary btn-sm" onclick="applySelected()">Apply Selected</button>
+        <button class="btn btn-secondary btn-sm" onclick="clearDiff()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Query tab -->
+  <div class="tab-pane" id="tab-query">
+    <label>Ask a question</label>
+    <textarea id="query-input" rows="3" placeholder="e.g. Who does Alice manage? What companies exist?"></textarea>
+    <button class="btn btn-primary" id="btn-query" onclick="runQuery()" disabled>Ask</button>
+    <div id="query-sparql"></div>
+    <div id="query-results"></div>
+    <hr style="border:none;border-top:1px solid #eee;margin:4px 0">
+    <label>Raw SPARQL (advanced)</label>
+    <textarea id="sparql-input" rows="4" placeholder="SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 20"></textarea>
+    <button class="btn btn-secondary btn-sm" onclick="runSparql()">Run SPARQL</button>
+  </div>
+
+  <!-- Schema tab -->
+  <div class="tab-pane" id="tab-schema">
+    <div id="schema-content">
+      <div style="color:#aaa;font-size:12px;text-align:center;margin-top:30px">Select a project to view its schema</div>
+    </div>
+  </div>
+
+  <!-- Details tab -->
+  <div class="tab-pane" id="tab-details">
+    <div id="details-empty">Click a node or edge in the graph to view details</div>
+    <div id="details-node" style="display:none">
+      <div id="detail-node-id"></div>
+      <div id="detail-node-label"></div>
+      <div class="detail-section">
+        <h4>Properties</h4>
+        <div class="props-editor" id="detail-props"></div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="addPropRow()">+ Add property</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="saveNodeEdits()">Save</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSelectedNode()">Delete Node</button>
+      </div>
+    </div>
+    <div id="details-edge" style="display:none">
+      <div class="detail-section">
+        <h4>Edge</h4>
+        <div style="font-size:12px;line-height:1.8">
+          <div><b>Source:</b> <span id="detail-edge-source"></span></div>
+          <div><b>Relation:</b> <span id="detail-edge-relation"></span></div>
+          <div><b>Target:</b> <span id="detail-edge-target"></span></div>
+        </div>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="deleteSelectedEdge()">Delete Edge</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modals ── -->
+<div id="modal-overlay">
+  <!-- New Project -->
+  <div class="modal" id="modal-new-project" style="display:none">
+    <h3>New Project</h3>
+    <div class="modal-field">
+      <label>Project ID</label>
+      <input type="text" id="new-project-id" placeholder="e.g. supply_chain" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="createProject()">Create</button>
+    </div>
+  </div>
+
+  <!-- Add Node -->
+  <div class="modal" id="modal-add-node" style="display:none">
+    <h3>Add Node</h3>
+    <div class="modal-field">
+      <label>Node ID</label>
+      <input type="text" id="new-node-id" placeholder="e.g. product_1" />
+    </div>
+    <div class="modal-field">
+      <label>Label (Class)</label>
+      <input type="text" id="new-node-label" placeholder="e.g. Product" />
+    </div>
+    <div class="modal-field">
+      <label>Properties (JSON)</label>
+      <textarea id="new-node-props" rows="3" placeholder='{"name": "Widget", "price": "99"}'></textarea>
+      <div class="props-input-hint">Optional. Enter as JSON object.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="addNode()">Add</button>
+    </div>
+  </div>
+
+  <!-- Add Edge -->
+  <div class="modal" id="modal-add-edge" style="display:none">
+    <h3>Add Edge</h3>
+    <div class="modal-field">
+      <label>Source Node ID</label>
+      <input type="text" id="new-edge-source" placeholder="e.g. product_1" />
+    </div>
+    <div class="modal-field">
+      <label>Relation</label>
+      <input type="text" id="new-edge-relation" placeholder="e.g. suppliedBy" />
+    </div>
+    <div class="modal-field">
+      <label>Target Node ID</label>
+      <input type="text" id="new-edge-target" placeholder="e.g. vendor_1" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="addEdge()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Status toast ── -->
+<div id="status"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────
+let currentProject = null;
+let cy = null;
+let selectedElement = null;
+let pendingDiff = null;
+
+// ── API ────────────────────────────────────────────────────────
+async function api(method, path, body = null) {
+  const opts = { method, headers: {} };
+  if (body !== null) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
+  }
+  return res.json();
+}
+
+// ── Status toast ───────────────────────────────────────────────
+let statusTimer;
+function status(msg, isError = false) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.background = isError ? '#cf1322' : '#333';
+  el.classList.add('show');
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── Projects ───────────────────────────────────────────────────
+async function loadProjects() {
+  const projects = await api('GET', '/projects');
+  const list = document.getElementById('project-list');
+  list.innerHTML = '';
+  if (projects.length === 0) {
+    list.innerHTML = '<div style="padding:12px 14px;color:#6b7a8d;font-size:11px">No projects yet</div>';
+    return;
+  }
+  projects.forEach(id => {
+    const el = document.createElement('div');
+    el.className = 'project-item' + (id === currentProject ? ' active' : '');
+    el.textContent = id;
+    el.onclick = () => selectProject(id);
+    list.appendChild(el);
+  });
+}
+
+async function selectProject(id) {
+  currentProject = id;
+  document.querySelectorAll('.project-item').forEach(el => {
+    el.classList.toggle('active', el.textContent === id);
+  });
+  ['btn-add-node','btn-add-edge','btn-relayout'].forEach(b => {
+    document.getElementById(b).style.display = '';
+  });
+  document.getElementById('btn-suggest').disabled = false;
+  document.getElementById('btn-query').disabled = false;
+  document.getElementById('empty-state').style.display = 'none';
+  clearDiff();
+  await loadGraph();
+  await loadSchema();
+}
+
+async function createProject() {
+  const id = document.getElementById('new-project-id').value.trim();
+  if (!id) return;
+  try {
+    await api('POST', '/projects', { id });
+    closeModal();
+    document.getElementById('new-project-id').value = '';
+    await loadProjects();
+    await selectProject(id);
+    status(`Project "${id}" created`);
+  } catch (e) { status(e.message, true); }
+}
+
+// ── Graph ──────────────────────────────────────────────────────
+function labelColor(label) {
+  const palette = ['#2980b9','#27ae60','#c0392b','#d35400','#8e44ad','#16a085','#e67e22','#2c3e50'];
+  let h = 0;
+  for (const c of label) h = (h * 31 + c.charCodeAt(0)) & 0x7fffffff;
+  return palette[h % palette.length];
+}
+
+function initCytoscape() {
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: [],
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'background-color': ele => labelColor(ele.data('label') || ''),
+          'label': ele => `${ele.data('label')}\n${ele.id()}`,
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'color': '#fff',
+          'text-outline-width': 2,
+          'text-outline-color': ele => labelColor(ele.data('label') || ''),
+          'font-size': 10,
+          'width': 64,
+          'height': 64,
+          'text-wrap': 'wrap',
+          'text-max-width': 60,
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'curve-style': 'bezier',
+          'target-arrow-shape': 'triangle',
+          'label': 'data(relation)',
+          'font-size': 10,
+          'text-rotation': 'autorotate',
+          'text-margin-y': -8,
+          'line-color': '#b0bec5',
+          'target-arrow-color': '#b0bec5',
+          'color': '#555',
+        }
+      },
+      {
+        selector: ':selected',
+        style: {
+          'border-width': 3,
+          'border-color': '#4a9eff',
+          'line-color': '#4a9eff',
+          'target-arrow-color': '#4a9eff',
+        }
+      }
+    ],
+    layout: { name: 'cose' },
+    wheelSensitivity: 0.3,
+  });
+
+  cy.on('tap', 'node', e => {
+    selectedElement = e.target;
+    showNodeDetails(e.target);
+    showTab('details');
+  });
+  cy.on('tap', 'edge', e => {
+    selectedElement = e.target;
+    showEdgeDetails(e.target);
+    showTab('details');
+  });
+  cy.on('tap', e => {
+    if (e.target === cy) {
+      selectedElement = null;
+      document.getElementById('details-node').style.display = 'none';
+      document.getElementById('details-edge').style.display = 'none';
+      document.getElementById('details-empty').style.display = '';
+    }
+  });
+}
+
+async function loadGraph() {
+  if (!currentProject) return;
+  const data = await api('GET', `/projects/${currentProject}/graph`);
+  renderGraph(data);
+}
+
+function renderGraph(data) {
+  if (!cy) initCytoscape();
+  cy.elements().remove();
+  const elements = [
+    ...data.nodes.map(n => ({ data: { id: n.id, label: n.label, ...n.properties } })),
+    ...data.edges.map(e => ({
+      data: {
+        id: `${e.source}__${e.relation}__${e.target}`,
+        source: e.source, target: e.target, relation: e.relation
+      }
+    }))
+  ];
+  cy.add(elements);
+  relayout();
+  document.getElementById('empty-state').style.display = data.nodes.length ? 'none' : '';
+}
+
+function relayout() {
+  if (!cy) return;
+  cy.layout({ name: 'cose', animate: true, randomize: false, fit: true, padding: 40 }).run();
+}
+
+// ── Schema ─────────────────────────────────────────────────────
+async function loadSchema() {
+  if (!currentProject) return;
+  const schema = await api('GET', `/projects/${currentProject}/schema`);
+  renderSchema(schema);
+}
+
+function renderSchema(schema) {
+  const el = document.getElementById('schema-content');
+  if (!schema.node_labels.length && !schema.relation_types.length) {
+    el.innerHTML = '<div style="color:#aaa;font-size:12px;text-align:center;margin-top:20px">No schema yet — add nodes via LLM Edit or manually</div>';
+    return;
+  }
+  let html = '';
+  if (schema.node_labels.length) {
+    html += '<div class="schema-section"><h4>Node Labels</h4>';
+    html += schema.node_labels.map(l => `<span class="tag tag-label" style="background:${labelColor(l)}22;border-color:${labelColor(l)}66;color:${labelColor(l)}">${l}</span>`).join('');
+    html += '</div>';
+  }
+  if (schema.relation_types.length) {
+    html += '<div class="schema-section"><h4>Relation Types</h4>';
+    html += schema.relation_types.map(r => `<span class="tag tag-rel">${r}</span>`).join('');
+    html += '</div>';
+  }
+  if (Object.keys(schema.properties_by_label).length) {
+    html += '<div class="schema-section"><h4>Properties</h4>';
+    for (const [label, props] of Object.entries(schema.properties_by_label)) {
+      html += `<div style="margin-bottom:6px"><span class="tag tag-label" style="background:${labelColor(label)}22;border-color:${labelColor(label)}66;color:${labelColor(label)}">${label}</span> `;
+      html += props.map(p => `<span class="tag tag-prop">${p}</span>`).join('');
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+// ── Node/Edge CRUD ─────────────────────────────────────────────
+async function addNode() {
+  const id = document.getElementById('new-node-id').value.trim();
+  const label = document.getElementById('new-node-label').value.trim();
+  const propsRaw = document.getElementById('new-node-props').value.trim();
+  if (!id || !label) { status('ID and Label are required', true); return; }
+  let properties = {};
+  if (propsRaw) {
+    try { properties = JSON.parse(propsRaw); } catch { status('Invalid JSON for properties', true); return; }
+  }
+  try {
+    await api('POST', `/projects/${currentProject}/nodes`, { id, label, properties });
+    closeModal();
+    document.getElementById('new-node-id').value = '';
+    document.getElementById('new-node-label').value = '';
+    document.getElementById('new-node-props').value = '';
+    await loadGraph();
+    await loadSchema();
+    status(`Node "${id}" added`);
+  } catch (e) { status(e.message, true); }
+}
+
+async function addEdge() {
+  const source = document.getElementById('new-edge-source').value.trim();
+  const relation = document.getElementById('new-edge-relation').value.trim();
+  const target = document.getElementById('new-edge-target').value.trim();
+  if (!source || !relation || !target) { status('All fields required', true); return; }
+  try {
+    await api('POST', `/projects/${currentProject}/edges`, { source, relation, target });
+    closeModal();
+    document.getElementById('new-edge-source').value = '';
+    document.getElementById('new-edge-relation').value = '';
+    document.getElementById('new-edge-target').value = '';
+    await loadGraph();
+    await loadSchema();
+    status('Edge added');
+  } catch (e) { status(e.message, true); }
+}
+
+async function deleteSelectedNode() {
+  if (!selectedElement || selectedElement.isEdge()) return;
+  const id = selectedElement.id();
+  if (!confirm(`Delete node "${id}"?`)) return;
+  try {
+    await api('DELETE', `/projects/${currentProject}/nodes/${id}`);
+    await loadGraph();
+    document.getElementById('details-node').style.display = 'none';
+    document.getElementById('details-empty').style.display = '';
+    selectedElement = null;
+    status(`Node "${id}" deleted`);
+  } catch (e) { status(e.message, true); }
+}
+
+async function deleteSelectedEdge() {
+  if (!selectedElement || selectedElement.isNode()) return;
+  const { source, target, relation } = selectedElement.data();
+  if (!confirm(`Delete edge "${source} → ${relation} → ${target}"?`)) return;
+  try {
+    await api('DELETE', `/projects/${currentProject}/edges?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}&relation=${encodeURIComponent(relation)}`);
+    await loadGraph();
+    document.getElementById('details-edge').style.display = 'none';
+    document.getElementById('details-empty').style.display = '';
+    selectedElement = null;
+    status('Edge deleted');
+  } catch (e) { status(e.message, true); }
+}
+
+async function saveNodeEdits() {
+  if (!selectedElement || selectedElement.isEdge()) return;
+  const node_id = selectedElement.id();
+  const rows = document.querySelectorAll('#detail-props .prop-row');
+  const properties = {};
+  rows.forEach(row => {
+    const k = row.querySelector('.prop-key').value.trim();
+    const v = row.querySelector('.prop-val').value.trim();
+    if (k) properties[k] = v;
+  });
+  try {
+    await api('PATCH', `/projects/${currentProject}/nodes/${node_id}`, { properties });
+    await loadGraph();
+    await loadSchema();
+    status('Node saved');
+  } catch (e) { status(e.message, true); }
+}
+
+// ── Details panel ──────────────────────────────────────────────
+function showNodeDetails(ele) {
+  document.getElementById('details-empty').style.display = 'none';
+  document.getElementById('details-edge').style.display = 'none';
+  const panel = document.getElementById('details-node');
+  panel.style.display = '';
+  document.getElementById('detail-node-id').textContent = ele.id();
+  const label = ele.data('label') || '';
+  const labelEl = document.getElementById('detail-node-label');
+  labelEl.textContent = label;
+  labelEl.style.background = labelColor(label);
+
+  const propsContainer = document.getElementById('detail-props');
+  propsContainer.innerHTML = '';
+  const data = ele.data();
+  const skip = new Set(['id', 'label']);
+  for (const [k, v] of Object.entries(data)) {
+    if (skip.has(k)) continue;
+    appendPropRow(propsContainer, k, v);
+  }
+}
+
+function showEdgeDetails(ele) {
+  document.getElementById('details-empty').style.display = 'none';
+  document.getElementById('details-node').style.display = 'none';
+  document.getElementById('details-edge').style.display = '';
+  document.getElementById('detail-edge-source').textContent = ele.data('source');
+  document.getElementById('detail-edge-relation').textContent = ele.data('relation');
+  document.getElementById('detail-edge-target').textContent = ele.data('target');
+}
+
+function appendPropRow(container, k = '', v = '') {
+  const row = document.createElement('div');
+  row.className = 'prop-row';
+  row.innerHTML = `
+    <input class="prop-key" type="text" value="${escHtml(k)}" placeholder="key">
+    <input class="prop-val" type="text" value="${escHtml(v)}" placeholder="value">
+    <button class="btn btn-secondary btn-sm" onclick="this.parentElement.remove()">✕</button>
+  `;
+  container.appendChild(row);
+}
+
+function addPropRow() {
+  appendPropRow(document.getElementById('detail-props'));
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── LLM Edit ───────────────────────────────────────────────────
+async function suggestEdits() {
+  const content = document.getElementById('edit-content').value.trim();
+  if (!content || !currentProject) return;
+  const btn = document.getElementById('btn-suggest');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Thinking…';
+  clearDiff();
+  try {
+    const diff = await api('POST', `/projects/${currentProject}/llm/suggest`, { content });
+    pendingDiff = diff;
+    renderDiff(diff);
+  } catch (e) {
+    status('LLM error: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Suggest Changes';
+  }
+}
+
+function renderDiff(diff) {
+  const list = document.getElementById('diff-list');
+  list.innerHTML = '';
+
+  const addItem = (cls, op, text, dataKey, dataVal) => {
+    const item = document.createElement('div');
+    item.className = `diff-item ${cls}`;
+    item.dataset[dataKey] = JSON.stringify(dataVal);
+    item.innerHTML = `
+      <input type="checkbox" checked>
+      <div class="diff-text"><span class="diff-op">${op}</span>${escHtml(text)}</div>
+    `;
+    list.appendChild(item);
+  };
+
+  (diff.add_nodes || []).forEach(n => {
+    const props = Object.entries(n.properties || {}).map(([k,v]) => `${k}=${v}`).join(', ');
+    addItem('add', '+ Node', `"${n.id}" (${n.label})${props ? ' · '+props : ''}`, 'addNode', n);
+  });
+  (diff.add_edges || []).forEach(e => {
+    addItem('add', '+ Edge', `${e.source} →${e.relation}→ ${e.target}`, 'addEdge', e);
+  });
+  (diff.modify_nodes || []).forEach(n => {
+    const props = Object.entries(n.properties || {}).map(([k,v]) => `${k}=${v}`).join(', ');
+    addItem('modify', '~ Modify', `"${n.id}" · ${props}`, 'modifyNode', n);
+  });
+  (diff.delete_nodes || []).forEach(id => {
+    addItem('delete', '− Node', `"${id}"`, 'deleteNode', id);
+  });
+  (diff.delete_edges || []).forEach(e => {
+    addItem('delete', '− Edge', `${e.source} →${e.relation}→ ${e.target}`, 'deleteEdge', e);
+  });
+
+  if (list.children.length === 0) {
+    list.innerHTML = '<div style="color:#aaa;font-size:12px;padding:8px">No changes suggested.</div>';
+  }
+  document.getElementById('diff-preview').classList.add('visible');
+}
+
+async function applySelected() {
+  const items = document.querySelectorAll('#diff-list .diff-item');
+  const selectedDiff = { add_nodes: [], add_edges: [], modify_nodes: [], delete_nodes: [], delete_edges: [] };
+
+  items.forEach(item => {
+    if (!item.querySelector('input[type=checkbox]').checked) return;
+    const d = item.dataset;
+    if (d.addNode) selectedDiff.add_nodes.push(JSON.parse(d.addNode));
+    if (d.addEdge) selectedDiff.add_edges.push(JSON.parse(d.addEdge));
+    if (d.modifyNode) selectedDiff.modify_nodes.push(JSON.parse(d.modifyNode));
+    if (d.deleteNode) selectedDiff.delete_nodes.push(JSON.parse(d.deleteNode));
+    if (d.deleteEdge) selectedDiff.delete_edges.push(JSON.parse(d.deleteEdge));
+  });
+
+  try {
+    await api('POST', `/projects/${currentProject}/llm/apply`, selectedDiff);
+    clearDiff();
+    await loadGraph();
+    await loadSchema();
+    status('Changes applied');
+  } catch (e) { status(e.message, true); }
+}
+
+function clearDiff() {
+  pendingDiff = null;
+  document.getElementById('diff-preview').classList.remove('visible');
+  document.getElementById('diff-list').innerHTML = '';
+}
+
+// ── Query ──────────────────────────────────────────────────────
+async function runQuery() {
+  const question = document.getElementById('query-input').value.trim();
+  if (!question || !currentProject) return;
+  const btn = document.getElementById('btn-query');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Querying…';
+  document.getElementById('query-sparql').style.display = 'none';
+  document.getElementById('query-results').innerHTML = '';
+  try {
+    const res = await api('POST', `/projects/${currentProject}/query`, { question });
+    const sparqlEl = document.getElementById('query-sparql');
+    sparqlEl.textContent = res.sparql;
+    sparqlEl.style.display = '';
+    if (res.error) {
+      document.getElementById('query-results').innerHTML = `<div style="color:#cf1322;font-size:12px;margin-top:6px">Error: ${escHtml(res.error)}</div>`;
+    } else {
+      renderQueryResults(res.result);
+    }
+  } catch (e) { status(e.message, true); }
+  finally { btn.disabled = false; btn.textContent = 'Ask'; }
+}
+
+async function runSparql() {
+  const sparql = document.getElementById('sparql-input').value.trim();
+  if (!sparql || !currentProject) return;
+  try {
+    const res = await api('POST', `/projects/${currentProject}/sparql`, { sparql });
+    document.getElementById('query-sparql').textContent = sparql;
+    document.getElementById('query-sparql').style.display = '';
+    renderQueryResults(res);
+  } catch (e) { status(e.message, true); }
+}
+
+function renderQueryResults(result) {
+  const el = document.getElementById('query-results');
+  if (!result) { el.innerHTML = ''; return; }
+  if (result.type === 'select') {
+    if (!result.rows.length) { el.innerHTML = '<div style="color:#aaa;font-size:12px;margin-top:6px">No results.</div>'; return; }
+    let html = '<table id="query-results-table"><thead><tr>';
+    result.variables.forEach(v => { html += `<th>${escHtml(v)}</th>`; });
+    html += '</tr></thead><tbody>';
+    result.rows.forEach(row => {
+      html += '<tr>';
+      result.variables.forEach(v => { html += `<td>${escHtml(row[v] ?? '')}</td>`; });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  } else if (result.type === 'ask') {
+    el.innerHTML = `<div style="margin-top:8px;font-size:13px"><b>Result:</b> ${result.result ? '✅ Yes' : '❌ No'}</div>`;
+  } else {
+    el.innerHTML = `<pre style="font-size:10px;overflow:auto">${escHtml(JSON.stringify(result, null, 2))}</pre>`;
+  }
+}
+
+// ── UI helpers ─────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+    const names = ['edit','query','schema','details'];
+    btn.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(pane => {
+    pane.classList.toggle('active', pane.id === `tab-${name}`);
+  });
+}
+
+let activeModal = null;
+function openModal(name) {
+  if (!currentProject && name !== 'new-project') { status('Select a project first', true); return; }
+  document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+  document.getElementById(`modal-${name}`).style.display = '';
+  document.getElementById('modal-overlay').classList.add('visible');
+  activeModal = name;
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('visible');
+  activeModal = null;
+}
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+    if (selectedElement && selectedElement.isNode()) deleteSelectedNode();
+    if (selectedElement && selectedElement.isEdge()) deleteSelectedEdge();
+  }
+});
+
+// ── Init ───────────────────────────────────────────────────────
+(async () => {
+  initCytoscape();
+  await loadProjects();
+})();
+</script>
+</body>
+</html>
