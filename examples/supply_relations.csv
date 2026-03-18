@@ -1,0 +1,10 @@
+part_id,supplier_id,lead_time_days,moq,price_per_unit
+frame_a,sup_frame,21,50,95.00
+wheel_front,sup_shimano,14,100,38.00
+wheel_rear,sup_shimano,14,100,38.00
+motor_b,sup_bafang,30,20,185.00
+battery_c,sup_samsung,28,30,155.00
+screw_m5,sup_fastener,7,1000,0.18
+bracket_1,sup_frame,21,50,10.00
+cell_18650,sup_samsung,28,500,6.80
+controller_1,sup_bafang,30,20,38.00

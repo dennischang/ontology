@@ -342,6 +342,7 @@
   <div class="tabs">
     <button class="tab-btn active" onclick="showTab('edit')">LLM Edit</button>
     <button class="tab-btn" onclick="showTab('query')">Query</button>
+    <button class="tab-btn" onclick="showTab('tables')">Tables</button>
     <button class="tab-btn" onclick="showTab('schema')">Schema</button>
     <button class="tab-btn" onclick="showTab('details')">Details</button>
   </div>
@@ -376,6 +377,82 @@ e.g. 'Alice is a software engineer at Acme Corp. She manages Bob, who is a desig
     <label>Raw SPARQL (advanced)</label>
     <textarea id="sparql-input" rows="4" placeholder="SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 20"></textarea>
     <button class="btn btn-secondary btn-sm" onclick="runSparql()">Run SPARQL</button>
+  </div>
+
+  <!-- Tables tab -->
+  <div class="tab-pane" id="tab-tables">
+    <label>Upload CSV / Parquet</label>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input type="text" id="upload-table-name" placeholder="Table name" style="flex:1">
+      <input type="file" id="upload-file" accept=".csv,.parquet" style="font-size:11px;flex:1">
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="uploadTable()" id="btn-upload" disabled>Upload</button>
+    <hr style="border:none;border-top:1px solid #eee;margin:4px 0">
+    <label>Tables</label>
+    <div id="tables-list" style="font-size:12px;color:#aaa">Select a project</div>
+
+    <!-- Table detail + mapping -->
+    <div id="table-detail" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 4px">
+        <label id="table-detail-name" style="color:#333;font-size:12px;margin:0"></label>
+        <div id="table-detail-mapping-badge"></div>
+      </div>
+      <div id="table-columns"></div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="openMappingForm('class')">Map as Class</button>
+        <button class="btn btn-primary btn-sm" onclick="openMappingForm('relation')">Map as Relation</button>
+        <button class="btn btn-primary btn-sm" id="btn-sync-to-graph" style="display:none" onclick="syncToGraph()">Sync to Graph</button>
+      </div>
+
+      <!-- Class mapping form -->
+      <div id="mapping-form-class" style="display:none;margin-top:10px;padding:10px;background:#f8f9fb;border:1px solid #dde3ec;border-radius:5px">
+        <div style="font-weight:600;font-size:11px;margin-bottom:8px">Map as Class (Node)</div>
+        <div class="modal-field">
+          <label>Class Name</label>
+          <input type="text" id="map-class-name" placeholder="e.g. Part">
+        </div>
+        <div class="modal-field">
+          <label>ID Column</label>
+          <select id="map-class-id-col" style="width:100%;padding:6px 8px;border:1px solid #dde3ec;border-radius:5px;font-size:12px"></select>
+        </div>
+        <div class="modal-field">
+          <label>Column → Property Mapping</label>
+          <div id="map-class-columns" style="font-size:11px"></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="saveClassMapping()">Save Mapping</button>
+          <button class="btn btn-secondary btn-sm" onclick="closeMappingForm()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Relation mapping form -->
+      <div id="mapping-form-relation" style="display:none;margin-top:10px;padding:10px;background:#f8f9fb;border:1px solid #dde3ec;border-radius:5px">
+        <div style="font-weight:600;font-size:11px;margin-bottom:8px">Map as Relation (Edge)</div>
+        <div class="modal-field">
+          <label>Relation Name</label>
+          <input type="text" id="map-rel-name" placeholder="e.g. contains">
+        </div>
+        <div class="modal-field">
+          <label>Source Column (parent)</label>
+          <select id="map-rel-source-col" style="width:100%;padding:6px 8px;border:1px solid #dde3ec;border-radius:5px;font-size:12px"></select>
+        </div>
+        <div class="modal-field">
+          <label>Target Column (child)</label>
+          <select id="map-rel-target-col" style="width:100%;padding:6px 8px;border:1px solid #dde3ec;border-radius:5px;font-size:12px"></select>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="saveRelationMapping()">Save Mapping</button>
+          <button class="btn btn-secondary btn-sm" onclick="closeMappingForm()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid #eee;margin:4px 0">
+    <label>Run SQL</label>
+    <textarea id="sql-input" rows="4" placeholder="SELECT * FROM my_table LIMIT 20"></textarea>
+    <button class="btn btn-secondary btn-sm" onclick="runSql()">Run SQL</button>
+    <div id="sql-query-display" style="display:none;background:#f8f9fb;border:1px solid #dde3ec;border-radius:5px;padding:8px;font-family:'Menlo','Courier New',monospace;font-size:11px;color:#555;white-space:pre-wrap;word-break:break-all"></div>
+    <div id="sql-results"></div>
   </div>
 
   <!-- Schema tab -->
@@ -549,10 +626,12 @@ async function selectProject(id) {
   });
   document.getElementById('btn-suggest').disabled = false;
   document.getElementById('btn-query').disabled = false;
+  document.getElementById('btn-upload').disabled = false;
   document.getElementById('empty-state').style.display = 'none';
   clearDiff();
   await loadGraph();
   await loadSchema();
+  await loadTables();
 }
 
 async function createProject() {
@@ -581,6 +660,7 @@ async function deleteProject(id) {
       });
       document.getElementById('btn-suggest').disabled = true;
       document.getElementById('btn-query').disabled = true;
+      document.getElementById('btn-upload').disabled = true;
     }
     await loadProjects();
     status(`Project "${id}" deleted`);
@@ -768,24 +848,39 @@ function relayout() {
 async function loadSchema() {
   if (!currentProject) return;
   const schema = await api('GET', `/projects/${currentProject}/schema`);
-  renderSchema(schema);
+  const pSchema = await api('GET', `/projects/${currentProject}/project-schema`);
+  renderSchema(schema, pSchema);
 }
 
-function renderSchema(schema) {
+function renderSchema(schema, pSchema) {
   const el = document.getElementById('schema-content');
-  if (!schema.node_labels.length && !schema.relation_types.length) {
+  const hasGraph = schema.node_labels.length || schema.relation_types.length;
+  const hasMapping = Object.keys(pSchema.classes || {}).some(k => pSchema.classes[k].source)
+    || Object.keys(pSchema.relations || {}).some(k => pSchema.relations[k].source);
+
+  if (!hasGraph && !hasMapping) {
     el.innerHTML = '<div style="color:#aaa;font-size:12px;text-align:center;margin-top:20px">No schema yet — add nodes via LLM Edit or manually</div>';
     return;
   }
   let html = '';
+
+  // Graph schema
   if (schema.node_labels.length) {
     html += '<div class="schema-section"><h4>Node Labels</h4>';
-    html += schema.node_labels.map(l => `<span class="tag tag-label" style="background:${labelColor(l)}22;border-color:${labelColor(l)}66;color:${labelColor(l)}">${l}</span>`).join('');
+    html += schema.node_labels.map(l => {
+      const cm = (pSchema.classes || {})[l];
+      const linked = cm && cm.source ? ` <span style="font-size:9px;color:#4a9eff">→ ${escHtml(cm.source)}</span>` : '';
+      return `<span class="tag tag-label" style="background:${labelColor(l)}22;border-color:${labelColor(l)}66;color:${labelColor(l)}">${l}${linked}</span>`;
+    }).join('');
     html += '</div>';
   }
   if (schema.relation_types.length) {
     html += '<div class="schema-section"><h4>Relation Types</h4>';
-    html += schema.relation_types.map(r => `<span class="tag tag-rel">${r}</span>`).join('');
+    html += schema.relation_types.map(r => {
+      const rm = (pSchema.relations || {})[r];
+      const linked = rm && rm.source ? ` <span style="font-size:9px;color:#4a9eff">→ ${escHtml(rm.source)}</span>` : '';
+      return `<span class="tag tag-rel">${r}${linked}</span>`;
+    }).join('');
     html += '</div>';
   }
   if (Object.keys(schema.properties_by_label).length) {
@@ -797,6 +892,31 @@ function renderSchema(schema) {
     }
     html += '</div>';
   }
+
+  // Table mappings section
+  const mappedClasses = Object.entries(pSchema.classes || {}).filter(([_, m]) => m.source);
+  const mappedRels = Object.entries(pSchema.relations || {}).filter(([_, m]) => m.source);
+  if (mappedClasses.length || mappedRels.length) {
+    html += '<hr style="border:none;border-top:1px solid #eee;margin:10px 0">';
+    html += '<div class="schema-section"><h4>Table Mappings</h4>';
+    mappedClasses.forEach(([name, m]) => {
+      html += `<div style="font-size:11px;margin-bottom:6px;padding:6px 8px;background:#f8f9fb;border-radius:4px">`;
+      html += `<div><b>${escHtml(name)}</b> → <code>${escHtml(m.source)}</code> (id: <code>${escHtml(m.id_column || 'id')}</code>)</div>`;
+      if (m.column_mapping && Object.keys(m.column_mapping).length) {
+        html += '<div style="color:#888;margin-top:2px">';
+        html += Object.entries(m.column_mapping).map(([prop, col]) => `${escHtml(prop)}→${escHtml(col)}`).join(', ');
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    mappedRels.forEach(([name, m]) => {
+      html += `<div style="font-size:11px;margin-bottom:6px;padding:6px 8px;background:#f8f9fb;border-radius:4px">`;
+      html += `<div><b>${escHtml(name)}</b> → <code>${escHtml(m.source)}</code> (${escHtml(m.source_column || '?')} → ${escHtml(m.target_column || '?')})</div>`;
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
   el.innerHTML = html;
 }
 
@@ -1079,10 +1199,245 @@ function renderQueryResults(result) {
   }
 }
 
+// ── Tables ────────────────────────────────────────────────────
+let currentTable = null;
+let currentTableCols = [];
+let projectSchema = null;
+
+async function loadTables() {
+  if (!currentProject) return;
+  try {
+    const tables = await api('GET', `/projects/${currentProject}/tables`);
+    projectSchema = await api('GET', `/projects/${currentProject}/project-schema`);
+    const el = document.getElementById('tables-list');
+    if (!tables.length) {
+      el.innerHTML = '<div style="color:#aaa;font-size:11px">No tables yet — upload a CSV</div>';
+      document.getElementById('table-detail').style.display = 'none';
+      return;
+    }
+    el.innerHTML = tables.map(t => {
+      const mapped = isMapped(t.name);
+      return `<div style="padding:4px 0;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="showTableDetail('${escHtml(t.name)}')">
+        <span style="color:#333;font-weight:500">${escHtml(t.name)}${mapped ? ' <span style="color:#4a9eff;font-size:10px">linked</span>' : ''}</span>
+        <span style="color:#999">${t.row_count} rows</span>
+      </div>`;
+    }).join('');
+  } catch (e) { /* ignore if project not ready */ }
+}
+
+function isMapped(tableName) {
+  if (!projectSchema) return false;
+  for (const m of Object.values(projectSchema.classes || {})) {
+    if (m.source === tableName) return true;
+  }
+  for (const m of Object.values(projectSchema.relations || {})) {
+    if (m.source === tableName) return true;
+  }
+  return false;
+}
+
+function getMappingsForTable(tableName) {
+  const classes = [], relations = [];
+  if (!projectSchema) return { classes, relations };
+  for (const [name, m] of Object.entries(projectSchema.classes || {})) {
+    if (m.source === tableName) classes.push({ name, ...m });
+  }
+  for (const [name, m] of Object.entries(projectSchema.relations || {})) {
+    if (m.source === tableName) relations.push({ name, ...m });
+  }
+  return { classes, relations };
+}
+
+async function showTableDetail(name) {
+  try {
+    const cols = await api('GET', `/projects/${currentProject}/tables/${encodeURIComponent(name)}`);
+    currentTable = name;
+    currentTableCols = cols;
+    document.getElementById('table-detail').style.display = '';
+    document.getElementById('table-detail-name').textContent = name;
+    document.getElementById('table-columns').innerHTML = cols.map(c =>
+      `<div style="font-size:11px;padding:2px 0;display:flex;gap:8px">
+        <span style="font-weight:500;color:#333">${escHtml(c.column)}</span>
+        <span style="color:#999">${escHtml(c.type)}</span>
+      </div>`
+    ).join('');
+    closeMappingForm();
+    updateMappingBadge();
+  } catch (e) { status(e.message, true); }
+}
+
+function updateMappingBadge() {
+  const badge = document.getElementById('table-detail-mapping-badge');
+  const { classes, relations } = getMappingsForTable(currentTable);
+  const btnSync = document.getElementById('btn-sync-to-graph');
+  let parts = [];
+  if (classes.length) {
+    parts.push(classes.map(c => `<span class="tag tag-label" style="font-size:10px">${escHtml(c.name)}</span>`).join(''));
+  }
+  if (relations.length) {
+    parts.push(relations.map(r => `<span class="tag tag-rel" style="font-size:10px">${escHtml(r.name)}</span>`).join(''));
+  }
+  btnSync.style.display = (classes.length || relations.length) ? '' : 'none';
+  badge.innerHTML = parts.join(' ');
+}
+
+function openMappingForm(type) {
+  closeMappingForm();
+  const colOptions = currentTableCols.map(c => `<option value="${escHtml(c.column)}">${escHtml(c.column)}</option>`).join('');
+  if (type === 'class') {
+    document.getElementById('mapping-form-class').style.display = '';
+    document.getElementById('map-class-id-col').innerHTML = colOptions;
+    // Build column mapping checkboxes
+    const container = document.getElementById('map-class-columns');
+    container.innerHTML = currentTableCols.map(c =>
+      `<div style="display:flex;gap:6px;align-items:center;padding:2px 0">
+        <input type="checkbox" checked data-col="${escHtml(c.column)}">
+        <span style="color:#333;min-width:80px">${escHtml(c.column)}</span>
+        <span style="color:#999">→</span>
+        <input type="text" value="${escHtml(c.column)}" data-col-map="${escHtml(c.column)}" style="flex:1;padding:3px 6px;font-size:11px" placeholder="property name">
+      </div>`
+    ).join('');
+  } else {
+    document.getElementById('mapping-form-relation').style.display = '';
+    document.getElementById('map-rel-source-col').innerHTML = colOptions;
+    document.getElementById('map-rel-target-col').innerHTML = colOptions;
+  }
+}
+
+function closeMappingForm() {
+  document.getElementById('mapping-form-class').style.display = 'none';
+  document.getElementById('mapping-form-relation').style.display = 'none';
+}
+
+async function saveClassMapping() {
+  const className = document.getElementById('map-class-name').value.trim();
+  const idCol = document.getElementById('map-class-id-col').value;
+  if (!className) { status('Class name is required', true); return; }
+  const columnMapping = {};
+  document.querySelectorAll('#map-class-columns input[type=checkbox]').forEach(cb => {
+    if (!cb.checked) return;
+    const col = cb.dataset.col;
+    if (col === idCol) return; // skip ID column from property mapping
+    const propInput = document.querySelector(`#map-class-columns input[data-col-map="${col}"]`);
+    const propName = propInput ? propInput.value.trim() : col;
+    if (propName) columnMapping[propName] = col;
+  });
+  try {
+    await api('PATCH', `/projects/${currentProject}/project-schema/classes/${encodeURIComponent(className)}`, {
+      mapping: { source: currentTable, id_column: idCol, column_mapping: columnMapping }
+    });
+    projectSchema = await api('GET', `/projects/${currentProject}/project-schema`);
+    closeMappingForm();
+    updateMappingBadge();
+    await loadTables();
+    status(`Class "${className}" mapped to table "${currentTable}"`);
+  } catch (e) { status(e.message, true); }
+}
+
+async function saveRelationMapping() {
+  const relName = document.getElementById('map-rel-name').value.trim();
+  const srcCol = document.getElementById('map-rel-source-col').value;
+  const tgtCol = document.getElementById('map-rel-target-col').value;
+  if (!relName) { status('Relation name is required', true); return; }
+  if (srcCol === tgtCol) { status('Source and target columns must be different', true); return; }
+  try {
+    await api('PATCH', `/projects/${currentProject}/project-schema/relations/${encodeURIComponent(relName)}`, {
+      mapping: { source: currentTable, source_column: srcCol, target_column: tgtCol }
+    });
+    projectSchema = await api('GET', `/projects/${currentProject}/project-schema`);
+    closeMappingForm();
+    updateMappingBadge();
+    await loadTables();
+    status(`Relation "${relName}" mapped to table "${currentTable}"`);
+  } catch (e) { status(e.message, true); }
+}
+
+async function syncToGraph() {
+  const { classes, relations } = getMappingsForTable(currentTable);
+  if (!classes.length && !relations.length) return;
+  const btn = document.getElementById('btn-sync-to-graph');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Syncing…';
+  let totalNodes = 0, totalEdges = 0;
+  try {
+    for (const cls of classes) {
+      const res = await api('POST', `/projects/${currentProject}/import/class`, { name: cls.name });
+      totalNodes += res.added;
+    }
+    for (const rel of relations) {
+      const res = await api('POST', `/projects/${currentProject}/import/relation`, { name: rel.name });
+      totalEdges += res.added;
+    }
+    await loadGraph();
+    await loadSchema();
+    const parts = [];
+    if (totalNodes) parts.push(`${totalNodes} nodes`);
+    if (totalEdges) parts.push(`${totalEdges} edges`);
+    status(`Synced to graph: ${parts.join(', ')}`);
+  } catch (e) { status(e.message, true); }
+  finally { btn.disabled = false; btn.textContent = 'Sync to Graph'; }
+}
+
+async function uploadTable() {
+  const name = document.getElementById('upload-table-name').value.trim();
+  const fileInput = document.getElementById('upload-file');
+  if (!name || !fileInput.files.length || !currentProject) {
+    status('Table name and file are required', true);
+    return;
+  }
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('table_name', name);
+  const btn = document.getElementById('btn-upload');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Uploading…';
+  try {
+    const res = await fetch(`/projects/${currentProject}/tables/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    document.getElementById('upload-table-name').value = '';
+    fileInput.value = '';
+    await loadTables();
+    status(`Table "${name}" uploaded: ${data.row_count} rows`);
+  } catch (e) { status(e.message, true); }
+  finally { btn.disabled = false; btn.textContent = 'Upload'; }
+}
+
+async function runSql() {
+  const sql = document.getElementById('sql-input').value.trim();
+  if (!sql || !currentProject) return;
+  try {
+    const res = await api('POST', `/projects/${currentProject}/sql`, { sql });
+    const display = document.getElementById('sql-query-display');
+    display.textContent = sql;
+    display.style.display = '';
+    renderSqlResults(res);
+  } catch (e) { status(e.message, true); }
+}
+
+function renderSqlResults(result) {
+  const el = document.getElementById('sql-results');
+  if (!result.columns.length) { el.innerHTML = '<div style="color:#aaa;font-size:12px;margin-top:6px">Query executed (no results).</div>'; return; }
+  if (!result.rows.length) { el.innerHTML = '<div style="color:#aaa;font-size:12px;margin-top:6px">No rows returned.</div>'; return; }
+  let html = '<table id="query-results-table" style="margin-top:8px"><thead><tr>';
+  result.columns.forEach(c => { html += `<th>${escHtml(c)}</th>`; });
+  html += '</tr></thead><tbody>';
+  result.rows.forEach(row => {
+    html += '<tr>';
+    result.columns.forEach(c => { html += `<td>${escHtml(row[c] ?? '')}</td>`; });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
 // ── UI helpers ─────────────────────────────────────────────────
 function showTab(name) {
   document.querySelectorAll('.tab-btn').forEach((btn, i) => {
-    const names = ['edit','query','schema','details'];
+    const names = ['edit','query','tables','schema','details'];
     btn.classList.toggle('active', names[i] === name);
   });
   document.querySelectorAll('.tab-pane').forEach(pane => {

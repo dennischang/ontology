@@ -1,0 +1,6 @@
+supplier_id,name,country,contact_email,rating
+sup_shimano,Shimano Inc.,Japan,sales@shimano.example.com,4.8
+sup_bafang,Bafang Electric,China,export@bafang.example.com,4.5
+sup_samsung,Samsung SDI,South Korea,cells@samsung-sdi.example.com,4.9
+sup_fastener,Global Fasteners Ltd.,Taiwan,orders@globalfast.example.com,4.2
+sup_frame,ProFrame Manufacturing,Taiwan,info@proframe.example.com,4.6

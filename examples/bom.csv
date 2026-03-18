@@ -1,0 +1,16 @@
+part_id,parent_id,part_name,category,qty,unit_cost
+bike_x,,X-Trail Bike,Assembly,1,899.00
+frame_a,bike_x,Aluminum Frame,Frame,1,120.00
+wheel_front,bike_x,Front Wheel 26",Wheel,1,45.00
+wheel_rear,bike_x,Rear Wheel 26",Wheel,1,45.00
+motor_b,bike_x,Hub Motor 500W,Motor,1,210.00
+battery_c,bike_x,Li-ion 48V 13Ah,Battery,1,180.00
+screw_m5,frame_a,M5x20 Hex Bolt,Fastener,8,0.35
+bracket_1,frame_a,Motor Mount Bracket,Frame,1,15.00
+spoke_f,wheel_front,Stainless Spoke 260mm,Wheel,36,0.80
+hub_f,wheel_front,Front Hub,Wheel,1,12.00
+spoke_r,wheel_rear,Stainless Spoke 260mm,Wheel,36,0.80
+hub_r,wheel_rear,Rear Hub (Motor),Motor,1,35.00
+cell_18650,battery_c,18650 Cell 3.7V,Battery,13,8.50
+bms_1,battery_c,BMS Board 48V,Battery,1,22.00
+controller_1,motor_b,Motor Controller,Motor,1,45.00

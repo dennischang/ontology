@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 import logging
 import traceback
 import secrets
+import tempfile
+import os
 import db
 import llm
 
@@ -71,7 +73,7 @@ def get_graph(project_id: str):
 
 @app.get("/projects/{project_id}/schema")
 def get_schema(project_id: str):
-    return db.get_schema(project_id)
+    return db.get_graph_schema(project_id)
 
 
 # --- Nodes ---
@@ -179,6 +181,117 @@ def run_sparql(project_id: str, body: SparqlBody):
         return result
     except Exception as e:
         log.error(f"[{project_id}] Raw SPARQL error: {e}")
+        raise HTTPException(400, str(e))
+
+
+# --- DuckDB Tables ---
+
+@app.get("/projects/{project_id}/tables")
+def list_tables(project_id: str):
+    return db.duckdb_list_tables(project_id)
+
+
+@app.get("/projects/{project_id}/tables/{table_name}")
+def table_schema(project_id: str, table_name: str):
+    return db.duckdb_table_schema(project_id, table_name)
+
+
+@app.post("/projects/{project_id}/tables/upload")
+async def upload_table(project_id: str, file: UploadFile = File(...), table_name: str = Form(...)):
+    try:
+        suffix = ".parquet" if file.filename and file.filename.endswith(".parquet") else ".csv"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            if suffix == ".parquet":
+                conn = db._duckdb(project_id)
+                safe_name = table_name.replace('"', '""')
+                conn.execute(
+                    f'CREATE OR REPLACE TABLE "{safe_name}" AS SELECT * FROM read_parquet(?)',
+                    [tmp_path],
+                )
+                count = conn.execute(f'SELECT COUNT(*) FROM "{safe_name}"').fetchone()[0]
+            else:
+                count = db.duckdb_upload_csv(project_id, table_name, tmp_path)
+        finally:
+            os.unlink(tmp_path)
+        log.info(f"[{project_id}] Uploaded table '{table_name}': {count} rows")
+        return {"table_name": table_name, "row_count": count}
+    except Exception as e:
+        log.error(f"[{project_id}] Upload error: {traceback.format_exc()}")
+        raise HTTPException(400, str(e))
+
+
+class SqlBody(BaseModel):
+    sql: str
+
+
+@app.post("/projects/{project_id}/sql")
+def run_sql(project_id: str, body: SqlBody):
+    try:
+        log.info(f"[{project_id}] SQL: {body.sql}")
+        result = db.duckdb_query(project_id, body.sql)
+        log.info(f"[{project_id}] SQL result: {len(result.get('rows', []))} rows")
+        return result
+    except Exception as e:
+        log.error(f"[{project_id}] SQL error: {e}")
+        raise HTTPException(400, str(e))
+
+
+# --- Project Schema (schema.json) ---
+
+@app.get("/projects/{project_id}/project-schema")
+def get_project_schema(project_id: str):
+    return db.get_project_schema(project_id)
+
+
+@app.put("/projects/{project_id}/project-schema")
+def set_project_schema(project_id: str, schema: dict):
+    db.save_project_schema(project_id, schema)
+    return {"ok": True}
+
+
+class MappingBody(BaseModel):
+    mapping: dict
+
+
+@app.patch("/projects/{project_id}/project-schema/classes/{class_name}")
+def patch_class_mapping(project_id: str, class_name: str, body: MappingBody):
+    db.update_class_mapping(project_id, class_name, body.mapping)
+    return {"ok": True}
+
+
+@app.patch("/projects/{project_id}/project-schema/relations/{relation_name}")
+def patch_relation_mapping(project_id: str, relation_name: str, body: MappingBody):
+    db.update_relation_mapping(project_id, relation_name, body.mapping)
+    return {"ok": True}
+
+
+# --- Import (DuckDB → Graph) ---
+
+class ImportBody(BaseModel):
+    name: str
+
+
+@app.post("/projects/{project_id}/import/class")
+def import_class(project_id: str, body: ImportBody):
+    try:
+        result = db.import_class_to_graph(project_id, body.name)
+        return result
+    except Exception as e:
+        log.error(f"[{project_id}] Import class error: {traceback.format_exc()}")
+        raise HTTPException(400, str(e))
+
+
+@app.post("/projects/{project_id}/import/relation")
+def import_relation(project_id: str, body: ImportBody):
+    try:
+        result = db.import_relation_to_graph(project_id, body.name)
+        return result
+    except Exception as e:
+        log.error(f"[{project_id}] Import relation error: {traceback.format_exc()}")
         raise HTTPException(400, str(e))
 
 

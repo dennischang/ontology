@@ -3,7 +3,7 @@ import json
 import logging
 import anthropic
 from dotenv import load_dotenv
-from db import get_schema, sparql_query, get_all_nodes
+from db import get_graph_schema, sparql_query, get_all_nodes
 
 log = logging.getLogger("ontology")
 
@@ -31,7 +31,7 @@ def _schema_text(schema: dict) -> str:
 
 
 def suggest_edits(project_id: str, content: str) -> dict:
-    schema = get_schema(project_id)
+    schema = get_graph_schema(project_id)
     existing_ids = [n["id"] for n in get_all_nodes(project_id)]
 
     prompt = f"""{_schema_text(schema)}
@@ -85,7 +85,7 @@ def _nodes_summary(project_id: str) -> str:
 
 
 def nl_query(project_id: str, question: str) -> dict:
-    schema = get_schema(project_id)
+    schema = get_graph_schema(project_id)
     ns = f"http://ontology.local/p/{re.sub(r'[^a-zA-Z0-9._~-]', '_', project_id)}/"
     nodes_summary = _nodes_summary(project_id)
 
